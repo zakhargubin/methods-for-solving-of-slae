@@ -1,0 +1,31 @@
+add_executable(test_tridiagonal_solver test_tridiagonal_solver.cpp)
+target_link_libraries(test_tridiagonal_solver PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_tridiagonal_solver COMMAND test_tridiagonal_solver)
+
+add_executable(test_dense_matrix test_dense_matrix.cpp)
+target_link_libraries(test_dense_matrix PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_dense_matrix COMMAND test_dense_matrix)
+
+add_executable(test_csr_matrix test_csr_matrix.cpp)
+target_link_libraries(test_csr_matrix PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_csr_matrix COMMAND test_csr_matrix)
+
+add_executable(test_vector_operations test_vector_operations.cpp)
+target_link_libraries(test_vector_operations PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_vector_operations COMMAND test_vector_operations)
+
+add_executable(test_matrix_vector_multiplication test_matrix_vector_multiplication.cpp)
+target_link_libraries(test_matrix_vector_multiplication PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_matrix_vector_multiplication COMMAND test_matrix_vector_multiplication)
+
+add_executable(test_householder_qr test_householder_qr.cpp)
+target_link_libraries(test_householder_qr PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_householder_qr COMMAND test_householder_qr)
+
+add_executable(test_qr_solver test_qr_solver.cpp)
+target_link_libraries(test_qr_solver PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_qr_solver COMMAND test_qr_solver)
+
+add_executable(test_iterative_solvers test_iterative_solvers.cpp)
+target_link_libraries(test_iterative_solvers PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_iterative_solvers COMMAND test_iterative_solvers)

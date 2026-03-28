@@ -1,0 +1,5 @@
+method,iterations,residual_norm,converged,diverged,total_elapsed_us
+MPI,206,9.757161427e-09,1,0,2923.098
+ChebyshevMPI,51,9.07257552e-09,1,0,641.975
+Jacobi,206,9.75716069e-09,1,0,3015.243
+GaussSeidel,108,9.165336434e-09,1,0,1769.73
