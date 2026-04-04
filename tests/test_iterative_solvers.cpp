@@ -38,7 +38,7 @@ slae::CSRMatrix make_test_matrix() {
     return slae::CSRMatrix(4, 4, entries);
 }
 
-slae::CSRMatrix make_tridiagonal(slae::index_type size,
+slae::CSRMatrix make_toeplitz_tridiagonal(slae::index_type size,
                                           slae::scalar_type diagonal,
                                           slae::scalar_type off_diagonal) {
     std::vector<slae::DokEntry> entries;
@@ -57,19 +57,20 @@ slae::CSRMatrix make_tridiagonal(slae::index_type size,
     return slae::CSRMatrix(size, size, entries);
 }
 
-slae::scalar_type lambda_min(slae::index_type size,
+slae::scalar_type toeplitz_lambda_min(slae::index_type size,
                                       slae::scalar_type diagonal,
                                       slae::scalar_type off_diagonal_abs) {
     const slae::scalar_type pi = std::acos(-1.0);
     return diagonal - 2.0 * off_diagonal_abs * std::cos(pi / static_cast<slae::scalar_type>(size + 1));
 }
 
-slae::scalar_type lambda_max(slae::index_type size,
+slae::scalar_type toeplitz_lambda_max(slae::index_type size,
                                       slae::scalar_type diagonal,
                                       slae::scalar_type off_diagonal_abs) {
     const slae::scalar_type pi = std::acos(-1.0);
     return diagonal + 2.0 * off_diagonal_abs * std::cos(pi / static_cast<slae::scalar_type>(size + 1));
 }
+
 
 }
 
@@ -109,6 +110,21 @@ int main() {
         return 1;
     }
 
+    const slae::IterativeSolverResult symmetric_gauss_seidel_result =
+        slae::symmetric_gauss_seidel(A, b, x0, 1e-10, 500, true);
+    if (!symmetric_gauss_seidel_result.converged || symmetric_gauss_seidel_result.diverged) {
+        std::cout << "fail: symmetric Gauss-Seidel did not converge on an SPD system\n";
+        return 1;
+    }
+    if (!vectors_close(symmetric_gauss_seidel_result.x, expected, 1e-7)) {
+        std::cout << "fail: symmetric Gauss-Seidel returned a wrong solution\n";
+        return 1;
+    }
+    if (symmetric_gauss_seidel_result.residual_norm_history.size() != symmetric_gauss_seidel_result.elapsed_microseconds_history.size()) {
+        std::cout << "fail: symmetric Gauss-Seidel history sizes do not match\n";
+        return 1;
+    }
+
     const slae::IterativeSolverResult simple_iteration_result =
         slae::simple_iteration(A, b, x0, 0.2, 1e-10, 1000, true);
     if (!simple_iteration_result.converged || simple_iteration_result.diverged) {
@@ -131,57 +147,166 @@ int main() {
     } catch (const std::runtime_error&) {
     }
 
-    const slae::index_type cheb_size = 40;
-    const slae::scalar_type diagonal = 2.2;
-    const slae::scalar_type off_diagonal = -1.0;
-    const slae::CSRMatrix A_cheb = make_tridiagonal(cheb_size, diagonal, off_diagonal);
-    const slae::vector_type cheb_expected(cheb_size, 1.0);
-    const slae::vector_type cheb_b = A_cheb * cheb_expected;
-    const slae::vector_type cheb_x0(cheb_size, 0.0);
-    const slae::scalar_type lda_min = lambda_min(cheb_size, diagonal, std::abs(off_diagonal));
-    const slae::scalar_type lda_max = lambda_max(cheb_size, diagonal, std::abs(off_diagonal));
-    const slae::scalar_type tau_opt = 2.0 / (lda_min + lda_max);
+    // DZ5 checks
+    const slae::index_type dz5_size = 40;
+    const slae::scalar_type dz5_diagonal = 2.2;
+    const slae::scalar_type dz5_off_diagonal = -1.0;
+    const slae::CSRMatrix A_dz5 = make_toeplitz_tridiagonal(dz5_size, dz5_diagonal, dz5_off_diagonal);
+    const slae::vector_type dz5_expected(dz5_size, 1.0);
+    const slae::vector_type dz5_b = A_dz5 * dz5_expected;
+    const slae::vector_type dz5_x0(dz5_size, 0.0);
+    const slae::scalar_type lambda_min = toeplitz_lambda_min(dz5_size, dz5_diagonal, std::abs(dz5_off_diagonal));
+    const slae::scalar_type lambda_max = toeplitz_lambda_max(dz5_size, dz5_diagonal, std::abs(dz5_off_diagonal));
+    const slae::scalar_type tau_opt = 2.0 / (lambda_min + lambda_max);
 
     const slae::IterativeSolverResult baseline_mpi =
-        slae::simple_iteration(A_cheb, cheb_b, cheb_x0, tau_opt, 1e-8, 1000, true);
-    const slae::IterativeSolverResult chebyshev_result =
-        slae::chebyshev_simple_iteration(A_cheb, cheb_b, cheb_x0,
-                                         lda_min, lda_max,
+        slae::simple_iteration(A_dz5, dz5_b, dz5_x0, tau_opt, 1e-8, 1000, true);
+    const slae::IterativeSolverResult chebyshev_mpi =
+        slae::chebyshev_simple_iteration(A_dz5, dz5_b, dz5_x0,
+                                         lambda_min, lambda_max,
                                          16, 1e-8, 1000, true);
 
-    if (!chebyshev_result.converged || chebyshev_result.diverged) {
-        std::cout << "fail: Chebyshev-accelerated MPI did not converge on an SPD system\n";
+    if (!baseline_mpi.converged || baseline_mpi.diverged) {
+        std::cout << "fail: baseline MPI did not converge on the DZ5 system\n";
         return 1;
     }
-    if (!vectors_close(chebyshev_result.x, cheb_expected, 1e-6)) {
+    if (!chebyshev_mpi.converged || chebyshev_mpi.diverged) {
+        std::cout << "fail: Chebyshev-accelerated MPI did not converge on the DZ5 system\n";
+        return 1;
+    }
+    if (!vectors_close(chebyshev_mpi.x, dz5_expected, 1e-6)) {
         std::cout << "fail: Chebyshev-accelerated MPI returned a wrong solution\n";
         return 1;
     }
-    if (chebyshev_result.residual_norm_history.size() != chebyshev_result.elapsed_microseconds_history.size()) {
-        std::cout << "fail: Chebyshev history sizes do not match\n";
+    if (chebyshev_mpi.residual_norm_history.size() != chebyshev_mpi.elapsed_microseconds_history.size()) {
+        std::cout << "fail: Chebyshev MPI history sizes do not match\n";
         return 1;
     }
-    if (!baseline_mpi.converged || baseline_mpi.diverged) {
-        std::cout << "fail: baseline MPI did not converge on the Chebyshev test system\n";
-        return 1;
-    }
-    if (chebyshev_result.iterations >= baseline_mpi.iterations) {
+    if (chebyshev_mpi.iterations >= baseline_mpi.iterations) {
         std::cout << "fail: Chebyshev acceleration was not faster than plain MPI\n";
         return 1;
     }
 
     const slae::scalar_type lambda_max_estimate =
-        slae::power_iteration_max_eigenvalue(A_cheb, 2000, 1e-12);
-    if (std::abs(lambda_max_estimate - lda_max) > 1e-6 * lda_max) {
+        slae::power_iteration_max_eigenvalue(A_dz5, 2000, 1e-12);
+    if (std::abs(lambda_max_estimate - lambda_max) > 1e-6 * lambda_max) {
         std::cout << "fail: power iteration produced a poor estimate of lambda_max\n";
         return 1;
     }
 
     try {
-        (void)slae::chebyshev_simple_iteration(A_cheb, cheb_b, cheb_x0,
-                                               lda_min, lda_max,
+        (void)slae::chebyshev_simple_iteration(A_dz5, dz5_b, dz5_x0,
+                                               lambda_min, lambda_max,
                                                3, 1e-8, 100, false);
         std::cout << "fail: Chebyshev MPI accepted a non-power-of-two root count\n";
+        return 1;
+    } catch (const std::runtime_error&) {
+    }
+
+    // DZ6 checks
+    const slae::index_type dz6_size = 40;
+    const slae::scalar_type diagonal = 4.0;
+    const slae::scalar_type off_diagonal = -1.0;
+    const slae::CSRMatrix A_cheb = make_toeplitz_tridiagonal(dz6_size, diagonal, off_diagonal);
+    const slae::vector_type cheb_expected(dz6_size, 1.0);
+    const slae::vector_type cheb_b = A_cheb * cheb_expected;
+    const slae::vector_type cheb_x0(dz6_size, 0.0);
+    const slae::vector_type zero_rhs(dz6_size, 0.0);
+
+    const auto jacobi_step = [&A_cheb, &cheb_b](const slae::vector_type& x) {
+        return slae::jacobi_step(A_cheb, cheb_b, x);
+    };
+    const auto jacobi_transition = [&A_cheb, &zero_rhs](const slae::vector_type& x) {
+        return slae::jacobi_step(A_cheb, zero_rhs, x);
+    };
+
+    const slae::scalar_type estimated_jacobi_rho =
+        slae::estimate_spectral_radius(jacobi_transition, dz6_size, 3000, 1e-12);
+    const auto exact_jacobi_rho = [dz6_size, diagonal, off_diagonal]() {
+        const slae::scalar_type pi = std::acos(-1.0);
+        return 2.0 * std::abs(off_diagonal)
+            * std::cos(pi / static_cast<slae::scalar_type>(dz6_size + 1))
+            / diagonal;
+    }();
+    if (std::abs(estimated_jacobi_rho - exact_jacobi_rho) > 1e-6) {
+        std::cout << "fail: spectral radius estimate for Jacobi is inaccurate\n";
+        return 1;
+    }
+
+    const slae::IterativeSolverResult plain_jacobi =
+        slae::jacobi(A_cheb, cheb_b, cheb_x0, 1e-8, 1000, true);
+    const slae::IterativeSolverResult accelerated_jacobi =
+        slae::chebyshev_accelerated_method(A_cheb, cheb_b, cheb_x0,
+                                           estimated_jacobi_rho,
+                                           jacobi_step,
+                                           1e-8, 1000, true);
+
+    if (!plain_jacobi.converged || plain_jacobi.diverged) {
+        std::cout << "fail: plain Jacobi did not converge on the Chebyshev test system\n";
+        return 1;
+    }
+    if (!accelerated_jacobi.converged || accelerated_jacobi.diverged) {
+        std::cout << "fail: accelerated Jacobi did not converge on the Chebyshev test system\n";
+        return 1;
+    }
+    if (!vectors_close(accelerated_jacobi.x, cheb_expected, 1e-6)) {
+        std::cout << "fail: accelerated Jacobi returned a wrong solution\n";
+        return 1;
+    }
+    if (accelerated_jacobi.iterations >= plain_jacobi.iterations) {
+        std::cout << "fail: Chebyshev acceleration did not improve Jacobi iteration count\n";
+        return 1;
+    }
+    if (accelerated_jacobi.residual_norm_history.size() != accelerated_jacobi.elapsed_microseconds_history.size()) {
+        std::cout << "fail: accelerated Jacobi history sizes do not match\n";
+        return 1;
+    }
+
+    const auto sgs_step = [&A_cheb, &cheb_b](const slae::vector_type& x) {
+        return slae::symmetric_gauss_seidel_step(A_cheb, cheb_b, x);
+    };
+    const auto sgs_transition = [&A_cheb, &zero_rhs](const slae::vector_type& x) {
+        return slae::symmetric_gauss_seidel_step(A_cheb, zero_rhs, x);
+    };
+
+    const slae::scalar_type estimated_sgs_rho =
+        slae::estimate_spectral_radius(sgs_transition, dz6_size, 3000, 1e-12);
+    if (!(estimated_sgs_rho > 0.0 && estimated_sgs_rho < 1.0)) {
+        std::cout << "fail: symmetric Gauss-Seidel spectral radius estimate is invalid\n";
+        return 1;
+    }
+
+    const slae::IterativeSolverResult plain_sgs =
+        slae::symmetric_gauss_seidel(A_cheb, cheb_b, cheb_x0, 1e-8, 1000, true);
+    const slae::IterativeSolverResult accelerated_sgs =
+        slae::chebyshev_accelerated_method(A_cheb, cheb_b, cheb_x0,
+                                           estimated_sgs_rho,
+                                           sgs_step,
+                                           1e-8, 1000, true);
+
+    if (!plain_sgs.converged || plain_sgs.diverged) {
+        std::cout << "fail: plain symmetric Gauss-Seidel did not converge\n";
+        return 1;
+    }
+    if (!accelerated_sgs.converged || accelerated_sgs.diverged) {
+        std::cout << "fail: accelerated symmetric Gauss-Seidel did not converge\n";
+        return 1;
+    }
+    if (!vectors_close(accelerated_sgs.x, cheb_expected, 1e-6)) {
+        std::cout << "fail: accelerated symmetric Gauss-Seidel returned a wrong solution\n";
+        return 1;
+    }
+    if (accelerated_sgs.iterations >= plain_sgs.iterations) {
+        std::cout << "fail: Chebyshev acceleration did not improve symmetric Gauss-Seidel iteration count\n";
+        return 1;
+    }
+
+    try {
+        (void)slae::chebyshev_accelerated_method(A_cheb, cheb_b, cheb_x0,
+                                                 1.0,
+                                                 jacobi_step,
+                                                 1e-8, 10, false);
+        std::cout << "fail: Chebyshev acceleration accepted rho = 1\n";
         return 1;
     } catch (const std::runtime_error&) {
     }
