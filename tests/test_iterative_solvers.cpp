@@ -72,7 +72,7 @@ slae::scalar_type toeplitz_lambda_max(slae::index_type size,
 }
 
 
-}
+} // namespace
 
 int main() {
     const slae::CSRMatrix A = make_test_matrix();
@@ -307,6 +307,29 @@ int main() {
                                                  jacobi_step,
                                                  1e-8, 10, false);
         std::cout << "fail: Chebyshev acceleration accepted rho = 1\n";
+        return 1;
+    } catch (const std::runtime_error&) {
+    }
+
+
+    const slae::IterativeSolverResult sor_result =
+        slae::sor(A, b, x0, 1.1, 1e-10, 500, true);
+    if (!sor_result.converged || sor_result.diverged) {
+        std::cout << "fail: SOR did not converge on an SPD system\n";
+        return 1;
+    }
+    if (!vectors_close(sor_result.x, expected, 1e-7)) {
+        std::cout << "fail: SOR returned a wrong solution\n";
+        return 1;
+    }
+    if (sor_result.residual_norm_history.size() != sor_result.elapsed_microseconds_history.size()) {
+        std::cout << "fail: SOR history sizes do not match\n";
+        return 1;
+    }
+
+    try {
+        (void)slae::sor(A, b, x0, 2.0, 1e-10, 10, false);
+        std::cout << "fail: SOR accepted omega = 2\n";
         return 1;
     } catch (const std::runtime_error&) {
     }

@@ -3,3 +3,6 @@ target_link_libraries(benchmark_matvec PRIVATE methods_for_solving_of_slae)
 
 add_executable(benchmark_iterative_solvers benchmark_iterative_solvers.cpp)
 target_link_libraries(benchmark_iterative_solvers PRIVATE methods_for_solving_of_slae)
+
+add_executable(benchmark_elliptic_methods benchmark_elliptic_methods.cpp)
+target_link_libraries(benchmark_elliptic_methods PRIVATE methods_for_solving_of_slae)

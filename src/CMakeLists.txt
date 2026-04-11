@@ -8,6 +8,8 @@ target_sources(methods_for_solving_of_slae
         vector_operations/vector_operations.cpp
         householder_qr/householder_qr.cpp
         iterative_solvers/iterative_solvers.cpp
+        gradient_methods/gradient_methods.cpp
+        elliptic_matrix/elliptic_matrix.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
@@ -19,4 +21,6 @@ target_sources(methods_for_solving_of_slae
             vector_operations/vector_operations.hpp
             householder_qr/householder_qr.hpp
             iterative_solvers/iterative_solvers.hpp
+            gradient_methods/gradient_methods.hpp
+            elliptic_matrix/elliptic_matrix.hpp
 )

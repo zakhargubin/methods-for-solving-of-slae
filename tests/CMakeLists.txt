@@ -29,3 +29,11 @@ add_test(NAME test_qr_solver COMMAND test_qr_solver)
 add_executable(test_iterative_solvers test_iterative_solvers.cpp)
 target_link_libraries(test_iterative_solvers PRIVATE methods_for_solving_of_slae)
 add_test(NAME test_iterative_solvers COMMAND test_iterative_solvers)
+
+add_executable(test_elliptic_matrix test_elliptic_matrix.cpp)
+target_link_libraries(test_elliptic_matrix PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_elliptic_matrix COMMAND test_elliptic_matrix)
+
+add_executable(test_gradient_methods test_gradient_methods.cpp)
+target_link_libraries(test_gradient_methods PRIVATE methods_for_solving_of_slae)
+add_test(NAME test_gradient_methods COMMAND test_gradient_methods)

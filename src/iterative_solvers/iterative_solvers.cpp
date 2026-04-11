@@ -111,20 +111,17 @@ void check_system_sizes(const slae::CSRMatrix& A,
     }
 }
 
-void ensure_finite_tolerance(slae::scalar_type tolerance);
-slae::vector_type jacobi_step_impl(const slae::CSRMatrix& A,
-                                   const slae::vector_type& b,
-                                   const slae::vector_type& x);
-slae::vector_type gauss_seidel_step_impl(const slae::CSRMatrix& A,
-                                         const slae::vector_type& b,
-                                         const slae::vector_type& x);
-slae::IterativeSolverResult run_stationary_solver(const slae::CSRMatrix& A,
-                                                  const slae::vector_type& b,
-                                                  const slae::vector_type& x0,
-                                                  const slae::IterationStep& step,
-                                                  slae::scalar_type tolerance,
-                                                  slae::index_type max_iterations,
-                                                  bool store_history);
+void ensure_finite_tolerance(slae::scalar_type tolerance) {
+    if (!std::isfinite(tolerance) || tolerance < 0.0) {
+        throw std::runtime_error("Iterative solver requires a finite non-negative tolerance");
+    }
+}
+
+void ensure_valid_relaxation(slae::scalar_type omega) {
+    if (!std::isfinite(omega) || omega <= 0.0 || omega >= 2.0) {
+        throw std::runtime_error("SOR requires a finite relaxation parameter omega in (0, 2)");
+    }
+}
 
 slae::IterativeSolverResult make_initial_result(const slae::CSRMatrix& A,
                                                 const slae::vector_type& b,
@@ -153,6 +150,150 @@ void append_history(slae::IterativeSolverResult& result,
     const std::chrono::duration<slae::scalar_type, std::micro> elapsed = now - start_time;
     result.residual_norm_history.push_back(residual);
     result.elapsed_microseconds_history.push_back(elapsed.count());
+}
+
+slae::vector_type jacobi_step_impl(const slae::CSRMatrix& A,
+                                   const slae::vector_type& b,
+                                   const slae::vector_type& x) {
+    check_system_sizes(A, b, x);
+
+    slae::vector_type next(A.ncols(), 0.0);
+    for (slae::index_type i = 0; i < A.nrows(); ++i) {
+        slae::scalar_type diagonal = 0.0;
+        slae::scalar_type sum = 0.0;
+
+        for (slae::index_type k = A.rows()[i]; k < A.rows()[i + 1]; ++k) {
+            const slae::index_type j = A.cols()[k];
+            const slae::scalar_type value = A.values()[k];
+            if (j == i) {
+                diagonal = value;
+            } else {
+                sum += value * x[j];
+            }
+        }
+
+        if (nearly_zero(diagonal)) {
+            throw std::runtime_error("Jacobi method requires non-zero diagonal elements");
+        }
+
+        next[i] = (b[i] - sum) / diagonal;
+    }
+
+    return next;
+}
+
+slae::vector_type gauss_seidel_step_impl(const slae::CSRMatrix& A,
+                                         const slae::vector_type& b,
+                                         const slae::vector_type& x) {
+    check_system_sizes(A, b, x);
+
+    slae::vector_type next = x;
+    for (slae::index_type i = 0; i < A.nrows(); ++i) {
+        slae::scalar_type diagonal = 0.0;
+        slae::scalar_type sum = b[i];
+
+        for (slae::index_type k = A.rows()[i]; k < A.rows()[i + 1]; ++k) {
+            const slae::index_type j = A.cols()[k];
+            const slae::scalar_type value = A.values()[k];
+            if (j == i) {
+                diagonal = value;
+            } else if (j < i) {
+                sum -= value * next[j];
+            } else {
+                sum -= value * x[j];
+            }
+        }
+
+        if (nearly_zero(diagonal)) {
+            throw std::runtime_error("Gauss-Seidel method requires non-zero diagonal elements");
+        }
+
+        next[i] = sum / diagonal;
+    }
+
+    return next;
+}
+
+slae::vector_type sor_step_impl(const slae::CSRMatrix& A,
+                                const slae::vector_type& b,
+                                const slae::vector_type& x,
+                                slae::scalar_type omega) {
+    check_system_sizes(A, b, x);
+    ensure_valid_relaxation(omega);
+
+    slae::vector_type next = x;
+    for (slae::index_type i = 0; i < A.nrows(); ++i) {
+        slae::scalar_type diagonal = 0.0;
+        slae::scalar_type sum = b[i];
+
+        for (slae::index_type k = A.rows()[i]; k < A.rows()[i + 1]; ++k) {
+            const slae::index_type j = A.cols()[k];
+            const slae::scalar_type value = A.values()[k];
+            if (j == i) {
+                diagonal = value;
+            } else if (j < i) {
+                sum -= value * next[j];
+            } else {
+                sum -= value * x[j];
+            }
+        }
+
+        if (nearly_zero(diagonal)) {
+            throw std::runtime_error("SOR requires non-zero diagonal elements");
+        }
+
+        const slae::scalar_type gauss_seidel_value = sum / diagonal;
+        next[i] = (1.0 - omega) * x[i] + omega * gauss_seidel_value;
+    }
+
+    return next;
+}
+
+slae::IterativeSolverResult run_stationary_solver(const slae::CSRMatrix& A,
+                                                  const slae::vector_type& b,
+                                                  const slae::vector_type& x0,
+                                                  const slae::IterationStep& step,
+                                                  slae::scalar_type tolerance,
+                                                  slae::index_type max_iterations,
+                                                  bool store_history) {
+    check_system_sizes(A, b, x0);
+    ensure_finite_tolerance(tolerance);
+
+    slae::IterativeSolverResult result = make_initial_result(A, b, x0, tolerance, store_history);
+    if (result.converged || result.diverged) {
+        return result;
+    }
+
+    const clock_type::time_point start_time = clock_type::now();
+    slae::vector_type current = x0;
+
+    for (slae::index_type iter = 1; iter <= max_iterations; ++iter) {
+        slae::vector_type next = step(current);
+        const slae::scalar_type current_residual_norm = slae::residual_norm(A, next, b);
+
+        result.x = next;
+        result.iterations = iter;
+        result.residual_norm = current_residual_norm;
+        result.diverged = !std::isfinite(current_residual_norm) || !is_finite_vector(next);
+
+        if (store_history) {
+            append_history(result, current_residual_norm, start_time);
+        }
+
+        if (result.diverged) {
+            return result;
+        }
+
+        if (current_residual_norm <= tolerance) {
+            result.converged = true;
+            return result;
+        }
+
+        current = std::move(next);
+    }
+
+    result.x = current;
+    return result;
 }
 
 }
@@ -390,129 +531,6 @@ IterativeSolverResult simple_iteration(const CSRMatrix& A,
     return result;
 }
 
-}
-
-namespace {
-
-void ensure_finite_tolerance(slae::scalar_type tolerance) {
-    if (!std::isfinite(tolerance) || tolerance < 0.0) {
-        throw std::runtime_error("Iterative solver requires a finite non-negative tolerance");
-    }
-}
-
-slae::vector_type jacobi_step_impl(const slae::CSRMatrix& A,
-                                   const slae::vector_type& b,
-                                   const slae::vector_type& x) {
-    check_system_sizes(A, b, x);
-
-    slae::vector_type next(A.ncols(), 0.0);
-    for (slae::index_type i = 0; i < A.nrows(); ++i) {
-        slae::scalar_type diagonal = 0.0;
-        slae::scalar_type sum = 0.0;
-
-        for (slae::index_type k = A.rows()[i]; k < A.rows()[i + 1]; ++k) {
-            const slae::index_type j = A.cols()[k];
-            const slae::scalar_type value = A.values()[k];
-            if (j == i) {
-                diagonal = value;
-            } else {
-                sum += value * x[j];
-            }
-        }
-
-        if (nearly_zero(diagonal)) {
-            throw std::runtime_error("Jacobi method requires non-zero diagonal elements");
-        }
-
-        next[i] = (b[i] - sum) / diagonal;
-    }
-
-    return next;
-}
-
-slae::vector_type gauss_seidel_step_impl(const slae::CSRMatrix& A,
-                                         const slae::vector_type& b,
-                                         const slae::vector_type& x) {
-    check_system_sizes(A, b, x);
-
-    slae::vector_type next = x;
-    for (slae::index_type i = 0; i < A.nrows(); ++i) {
-        slae::scalar_type diagonal = 0.0;
-        slae::scalar_type sum = b[i];
-
-        for (slae::index_type k = A.rows()[i]; k < A.rows()[i + 1]; ++k) {
-            const slae::index_type j = A.cols()[k];
-            const slae::scalar_type value = A.values()[k];
-            if (j == i) {
-                diagonal = value;
-            } else if (j < i) {
-                sum -= value * next[j];
-            } else {
-                sum -= value * x[j];
-            }
-        }
-
-        if (nearly_zero(diagonal)) {
-            throw std::runtime_error("Gauss-Seidel method requires non-zero diagonal elements");
-        }
-
-        next[i] = sum / diagonal;
-    }
-
-    return next;
-}
-
-slae::IterativeSolverResult run_stationary_solver(const slae::CSRMatrix& A,
-                                                  const slae::vector_type& b,
-                                                  const slae::vector_type& x0,
-                                                  const slae::IterationStep& step,
-                                                  slae::scalar_type tolerance,
-                                                  slae::index_type max_iterations,
-                                                  bool store_history) {
-    check_system_sizes(A, b, x0);
-    ensure_finite_tolerance(tolerance);
-
-    slae::IterativeSolverResult result = make_initial_result(A, b, x0, tolerance, store_history);
-    if (result.converged || result.diverged) {
-        return result;
-    }
-
-    const clock_type::time_point start_time = clock_type::now();
-    slae::vector_type current = x0;
-
-    for (slae::index_type iter = 1; iter <= max_iterations; ++iter) {
-        slae::vector_type next = step(current);
-        const slae::scalar_type current_residual_norm = slae::residual_norm(A, next, b);
-
-        result.x = next;
-        result.iterations = iter;
-        result.residual_norm = current_residual_norm;
-        result.diverged = !std::isfinite(current_residual_norm) || !is_finite_vector(next);
-
-        if (store_history) {
-            append_history(result, current_residual_norm, start_time);
-        }
-
-        if (result.diverged) {
-            return result;
-        }
-
-        if (current_residual_norm <= tolerance) {
-            result.converged = true;
-            return result;
-        }
-
-        current = std::move(next);
-    }
-
-    result.x = current;
-    return result;
-}
-
-}
-
-namespace slae {
-
 vector_type jacobi_step(const CSRMatrix& A,
                         const vector_type& b,
                         const vector_type& x) {
@@ -613,6 +631,18 @@ scalar_type estimate_spectral_radius(const IterationStep& homogeneous_step,
     return previous_rho;
 }
 
+IterativeSolverResult symmetric_gauss_seidel(const CSRMatrix& A,
+                                             const vector_type& b,
+                                             const vector_type& x0,
+                                             scalar_type tolerance,
+                                             index_type max_iterations,
+                                             bool store_history) {
+    const IterationStep step = [&A, &b](const vector_type& x) {
+        return symmetric_gauss_seidel_step(A, b, x);
+    };
+    return run_stationary_solver(A, b, x0, step, tolerance, max_iterations, store_history);
+}
+
 IterativeSolverResult chebyshev_accelerated_method(const CSRMatrix& A,
                                                    const vector_type& b,
                                                    const vector_type& x0,
@@ -695,14 +725,23 @@ IterativeSolverResult chebyshev_accelerated_method(const CSRMatrix& A,
     return result;
 }
 
-IterativeSolverResult symmetric_gauss_seidel(const CSRMatrix& A,
-                                             const vector_type& b,
-                                             const vector_type& x0,
-                                             scalar_type tolerance,
-                                             index_type max_iterations,
-                                             bool store_history) {
-    const IterationStep step = [&A, &b](const vector_type& x) {
-        return symmetric_gauss_seidel_step(A, b, x);
+
+vector_type sor_step(const CSRMatrix& A,
+                     const vector_type& b,
+                     const vector_type& x,
+                     scalar_type omega) {
+    return sor_step_impl(A, b, x, omega);
+}
+
+IterativeSolverResult sor(const CSRMatrix& A,
+                          const vector_type& b,
+                          const vector_type& x0,
+                          scalar_type omega,
+                          scalar_type tolerance,
+                          index_type max_iterations,
+                          bool store_history) {
+    const IterationStep step = [&A, &b, omega](const vector_type& x) {
+        return sor_step_impl(A, b, x, omega);
     };
     return run_stationary_solver(A, b, x0, step, tolerance, max_iterations, store_history);
 }

@@ -1,0 +1,6 @@
+method,iterations,residual_norm,converged,diverged,total_elapsed_us
+GaussSeidel,1728,9.920469114e-09,1,0,138096.562
+SOR,123,8.439903721e-09,1,0,10083.692
+ChebyshevSymmetricGaussSeidel,106,9.289301583e-09,1,0,14355.145
+SteepestDescent,3494,9.959769344e-09,1,0,174618.402
+ConjugateGradient,61,6.597967429e-09,1,0,3267.771

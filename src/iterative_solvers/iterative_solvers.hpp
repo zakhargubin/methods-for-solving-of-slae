@@ -93,4 +93,18 @@ IterativeSolverResult chebyshev_accelerated_method(const CSRMatrix& A,
                                                    index_type max_iterations,
                                                    bool store_history = false);
 
+vector_type sor_step(const CSRMatrix& A,
+                     const vector_type& b,
+                     const vector_type& x,
+                     scalar_type omega);
+
+IterativeSolverResult sor(const CSRMatrix& A,
+                          const vector_type& b,
+                          const vector_type& x0,
+                          scalar_type omega,
+                          scalar_type tolerance,
+                          index_type max_iterations,
+                          bool store_history = false);
+
+
 }
